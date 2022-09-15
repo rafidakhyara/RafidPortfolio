@@ -1,0 +1,403 @@
+---
+title: "ST2195 Coursework R Code"
+author: "Rafid Akhyara Agung"
+date: "3/21/2022"
+output: pdf_document
+---
+Question 1
+
+```{r}
+library(DBI)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(RColorBrewer)
+
+#Connect to SQL Database
+connect <- dbConnect(RSQLite::SQLite(), "04-05.db")
+
+#Query data from 2004 and 2005
+twok4 <- dbGetQuery(connect, 
+                    "SELECT Year, Month, DayOfWeek, CRSDepTime, ArrDelay
+                      FROM \"2004\"") 
+twok5 <- dbGetQuery(connect, 
+                    "SELECT Year, Month, DayOfWeek, CRSDepTime, ArrDelay
+                      FROM \"2005\"")
+
+dbDisconnect(connect)
+
+#Combine both data into one
+flights <- rbind(twok4, twok5)
+
+delays <- flights %>%
+  mutate(ArrDelay = as.numeric(ArrDelay), #Setting vars. as the appropriate class
+         CRSDepTime = as.numeric(CRSDepTime),
+         Year = as.integer(Year),
+         Month = as.integer(Month),
+         DayOfWeek = as.integer(DayOfWeek))%>%
+  filter(!is.na(ArrDelay) & !is.na(Year) & !is.na(Month) #Filter any NAs
+         & !is.na(CRSDepTime) & !is.na(DayOfWeek)) %>%
+  mutate(CRSDepTime = ifelse(CRSDepTime > 2359, CRSDepTime-2400, CRSDepTime), #Any time 2400 and above subtracted by 2400 to fit the 24 hour format
+         Hour = str_match(CRSDepTime, "(\\d+)\\d{2}")[,2]) %>% #Regex looks for at least 1 digit followed by two digits. Sets "at least 1 digit" as a group to be extracted.
+  mutate(Hour = ifelse(is.na(Hour), 0, Hour)) %>% #Converts NAs to zero and sets Hours as a factor
+  mutate(Hour = factor(Hour, levels = as.character(c(0:23))))
+
+#Box plot of delays in each hour
+ggplot(delays)+
+  geom_boxplot(aes(Hour,ArrDelay))+
+  ylim(-100,1500)
+  
+#Without Outliers
+ggplot(delays)+
+  geom_boxplot(aes(Hour,ArrDelay), outlier.shape = NA)+
+  ylim(-50,75)+
+  labs(y = "Arrival Delay (Minutes)")
+
+#Boxplot of delays in each weekday
+ggplot(delays)+
+  geom_boxplot(aes(as.factor(DayOfWeek),ArrDelay))+
+  ylim(-100,2000)
+
+#Without Outliers
+ggplot(delays)+
+  geom_boxplot(aes(as.factor(DayOfWeek),ArrDelay), outlier.shape = NA)+
+  ylim(-50,50)+
+  labs(x = "Weekday", y = "Arrival Delay (Minutes)")
+
+#Boxplot of delays in each month
+ggplot(delays)+
+  geom_boxplot(aes(as.factor(Month), ArrDelay))+
+  ylim(-100,2000)
+
+#Without Outliers
+ggplot(delays)+
+  geom_boxplot(aes(as.factor(Month),ArrDelay), outlier.shape = NA)+
+  ylim(-50,50)+
+  labs(x = "Month", y = "Arrival Delay (Minutes)")
+```
+
+Question 2
+
+```{r}
+library(DBI)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+
+#Connect to SQL Database
+connect <- dbConnect(RSQLite::SQLite(), "04-05.db")
+
+#Query data from 2004 and 2005
+twok4 <- dbGetQuery(connect, 
+                    "SELECT TailNum, ArrDelay
+                      FROM \"2004\"")
+twok5 <- dbGetQuery(connect, 
+                    "SELECT TailNum, ArrDelay
+                      FROM \"2005\"")
+
+#Join both datasets
+flights <- flights <- rbind(twok4, twok5)
+
+#Query planes data
+planes <- dbGetQuery(connect, "SELECT tailnum as TailNum, Year 
+                     FROM \"planedata\"")
+
+dbDisconnect(connect)
+
+#Join planes and flights datasets
+flights <- flights %>%
+  left_join(planes)
+
+agedelays <- flights %>%
+  filter(!is.na(year) & !ArrDelay == "NA" & #Filter any NAs and errors
+        !year == "0000" & !year == "None") %>%
+  group_by(year) %>%
+  summarize(mean = mean(as.numeric(ArrDelay))) %>% #Group by Year, then count the average ArrDelay
+  arrange(desc(mean)) %>%
+  as.data.frame()
+
+#Set 'year' to numeric for best fit line
+agedelays$year <- as.numeric(agedelays$year) 
+
+#Defining a color palette
+col <- brewer.pal(11, "RdBu")
+
+#Scatter plot of mean delays over year of plane
+agedelays %>%
+  ggplot()+
+  geom_point(aes(year, mean))+
+  geom_smooth(aes(year, mean), method = "lm", se = FALSE, col = col[9])+
+  labs(x = "Year", y = "Mean Arrival Delay (in minutes)")
+```
+
+Question 3
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(DBI)
+
+#Connect to SQL Database
+connect <- dbConnect(RSQLite::SQLite(), "04-05.db")
+
+#Query data from 2004 and 2005
+twok4 <- dbGetQuery(connect, 
+                    "SELECT Year, Month, Origin, Dest, Cancelled
+                      FROM \"2004\"")
+twok5 <- dbGetQuery(connect, 
+                    "SELECT Year, Month, Origin, Dest, Cancelled
+                      FROM \"2005\"")
+
+dbDisconnect(connect)
+
+#Combine both data into one
+flights <-  rbind(twok4, twok5)
+
+passengers <- flights %>%
+  filter(Cancelled != 1) %>% #Filter cancelled flights
+  group_by(Year, Month) %>%
+  summarize(n = n()) %>% #Count no. of flights per Month of each Year
+  as.data.frame()
+
+#Defining a color palette
+col <- brewer.pal(11, "RdBu")
+
+#Plot passengers over time
+ggplot(passengers %>%
+         mutate(index = c(1:nrow(passengers))))+
+  geom_line(aes(index, n))+
+  geom_point(aes(index, n, color = as.factor(Year)))+
+  scale_color_manual(values=c("#000000", col[9]))+
+  geom_vline(xintercept = 12.5, col = col[1], linetype = "dotted")+
+  labs(x = "Month", y = "Number of Flights", color = "Year")
+
+#Same as above but done for each combination of Origin and Destination
+passengers_destinations <- flights %>%
+  filter(Cancelled != 1) %>%
+  group_by(Origin, Dest, Year, Month) %>%
+  summarize(n = n()) %>%
+  as.data.frame()
+
+#Plot passengers over time for LAX-SAN
+ggplot(passengers_destinations %>%
+         filter(Origin == "LAX", Dest == "SAN") %>%
+         mutate(index = c(1:nrow(passengers))))+
+  geom_line(aes(index, n))+
+  geom_point(aes(index, n, color = as.factor(Year)))+
+  scale_color_manual(values=c("#000000", col[9]))+
+  geom_vline(xintercept = 12.5, col = col[1], linetype = "dotted")+
+  labs(title = "LAX-SAN", x = "Month", y = "Number of Flights", color = "Year")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Plot passengers over time for BOS-LGA
+ggplot(passengers_destinations %>%
+         filter(Origin == "BOS", Dest == "LGA") %>%
+         mutate(index = c(1:nrow(passengers))))+
+  geom_line(aes(index, n))+
+  geom_point(aes(index, n, color = as.factor(Year)))+
+  scale_color_manual(values=c("#000000", col[9]))+
+  geom_vline(xintercept = 12.5, col = col[1], linetype = "dotted")+
+  labs(title = "BOS-LGA", x = "Month", y = "Number of Flights", color = "Year")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+Question 4
+
+```{r}
+library(DBI)
+library(dplyr)
+library(ggplot2)
+
+#Connect to SQL Database
+connect <- dbConnect(RSQLite::SQLite(), "04-05.db")
+
+#Query Data from 2004 and 2005
+twok4 <- dbGetQuery(connect, 
+                    "SELECT Year, Month, DayOfMonth, CRSDepTime, TailNum, ArrDelay
+                      FROM \"2004\"")
+twok5 <- dbGetQuery(connect, 
+                    "SELECT Year, Month, DayOfMonth, CRSDepTime, TailNum, ArrDelay
+                      FROM \"2005\"")
+
+#Combine both data into one
+flights <- rbind(twok4, twok5)
+
+dbDisconnect(connect)
+
+cascade <- flights %>%
+  filter(!ArrDelay == "NA") %>% #Filter any NAs
+  mutate(CRSDepTime = ifelse(CRSDepTime > 2359, CRSDepTime-2400, CRSDepTime)) %>% #Any time 2400 and above subtracted by 2400 to fit the 24 hour format
+  group_by(Year, Month, DayofMonth, TailNum) %>% #Group by TailNum and show all its flights in one day
+  arrange(as.numeric(CRSDepTime), .by_group = TRUE) %>% #In each group, order by CRSDepTime
+  summarize(ArrDelay = list(ArrDelay[1:n()] > 0)) %>% #Create a logical vector, showing if flight was delayed or not
+  as.data.frame() %>%
+  filter(lengths(ArrDelay) >= 2) #Only analyze planes with two flights a day
+
+cascadebool <- c()
+for(x in 1:nrow(cascade)){
+  temp <- cascade$ArrDelay[x]
+  chain <- c()
+  for(m in c(2:lengths(temp))){
+    chain <- append(chain, temp[[1]][m-1] == TRUE & temp[[1]][m] == TRUE) #Detects if the current flight and flight before it was delayed
+  }
+  cascadebool[x] <- mean(chain) > 0 #If the above loop returned TRUE at least once, then a cascade has occured
+}
+
+cascade <- mutate(cascade,
+                  Cascade = cascadebool)
+```
+
+Question 5
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(DBI)
+library(mlr3)
+library(mlr3learners)
+library(mlr3pipelines)
+library(tidyverse)
+library(glmnet)
+library(mlr3tuning)
+library(paradox)
+library(fastDummies)
+
+connect <- dbConnect(RSQLite::SQLite(), "04-05.db")
+
+#Query data from 2004 and 2005
+twok4 <- dbGetQuery(connect, 
+                    "SELECT Year, Month, DayOfWeek, CRSDepTime, TailNum, Origin, Dest, ArrDelay, UniqueCarrier
+                      FROM \"2004\"") 
+twok5 <- dbGetQuery(connect, 
+                    "SELECT Year, Month, DayOfWeek, CRSDepTime, TailNum, Origin, Dest, ArrDelay, UniqueCarrier
+                      FROM \"2005\"")
+
+planes <- dbGetQuery(connect, "SELECT tailnum as TailNum, year
+                     FROM \"planedata\"")
+
+dbDisconnect(connect)
+
+#Combine two data frames into one
+flights <- rbind(twok4, twok5)
+
+#Similar to the procedure in question 1 to extract the hour
+q1 <- flights %>%
+  filter(!ArrDelay == "NA") %>%
+  mutate(ArrDelay = as.numeric(ArrDelay), 
+         CRSDepTime = as.numeric(CRSDepTime))%>%
+  mutate(CRSDepTime = ifelse(CRSDepTime > 2359, CRSDepTime-2400, CRSDepTime),
+         Hour = str_match(CRSDepTime, "(\\d+)\\d{2}")[,2]) %>% 
+  mutate(Hour = ifelse(is.na(Hour), 0, Hour))
+
+#Similar to the procedure in question 2, but this time we find the Age
+q2 <- planes %>%
+  filter(!year == "0000" & !year == "None") %>% 
+  mutate(Age = 2005 - as.integer(year)) %>% 
+  select(TailNum, Age)
+
+#Mean Overall Arrival Delays
+mu <- mean(as.numeric(flights$ArrDelay), na.rm = TRUE)
+
+#Seeing effect of the carrier on delays
+flights %>%
+  filter(!ArrDelay == "NA") %>%
+  group_by(UniqueCarrier) %>%
+  summarize(deviation = mean(as.numeric(ArrDelay)) - mu) %>% #Group by the carrier, then count the "Mean Arrival Delay per Carrier - Mean Overall Arrival Delay"
+  as.data.frame() %>%
+ggplot()+
+  geom_col(aes(x = UniqueCarrier, y = deviation))+ #Making a bar plot
+  labs(x = "Carrier", y = "Mean Arrival Delay per Carrier - Mean Overall Arrival Delay")+
+  theme_gray(base_size = 10)
+
+#Combining all the tables
+modelling <- q1 %>%
+  left_join(q2, by = "TailNum")
+
+#Setting all variables to the right type
+modelling <- modelling %>%
+  select(Month, DayOfWeek, Hour, ArrDelay, Age, UniqueCarrier) %>%
+  mutate(Month = as.character(Month),
+         DayOfWeek = as.character(DayOfWeek),
+         Hour = as.character(Hour),
+         ArrDelay = as.integer(ArrDelay),
+         Age = as.integer(Age),
+         UniqueCarrier = as.character(UniqueCarrier))
+
+#### FOR LINEAR REGRESSION ####
+
+#Subsetting the dataset 
+set.seed(1)
+modelling_lm <- modelling[sample(c(1:nrow(modelling)),1000000),]
+
+#Making dummy variables
+modelling_lm <- dummy_cols(modelling_lm, 
+                          select_columns = c("Month", "DayOfWeek", "Hour", "UniqueCarrier"), 
+                          remove_first_dummy = TRUE)
+
+modelling_lm <- modelling_lm[,-c(1,2,3,6)]
+
+#Define the task to predict ArrDelay
+task_lm <- TaskRegr$new(id = "delaymodel", backend = modelling_lm, target = "ArrDelay")
+measure <- msr("regr.rmse") #Set measure used as RMSE
+
+learner_lm <- lrn("regr.lm")
+
+gr_lm <- po("imputemean") %>>% #Impute missing values with the mean
+  po(learner_lm)
+glrn_lm <- GraphLearner$new(gr_lm)
+
+#Splitting train and testlm sets
+set.seed(1)
+indexlm <- c(1:nrow(modelling_lm))
+trainlm <- indexlm[sample(indexlm ,0.7 * length(indexlm))]
+testlm <- indexlm[-trainlm]
+
+#Fitting the model
+glrn_lm$train(task_lm, trainlm)
+
+#Creating the predictions and counting the RMSE
+glrn_lm$predict(task_lm, testlm)$score(measure) #Test error
+glrn_lm$predict(task_lm, trainlm)$score(measure) #Training error
+
+#### FOR RANDOM FORESTS ####
+
+#Subsetting the dataset
+set.seed(1)
+modelling_rf <- modelling[sample(c(1:nrow(modelling)),100000),]
+
+#Making dummy variables
+modelling_rf <- dummy_cols(modelling_rf,
+                          select_columns = c("Hour", "UniqueCarrier", "DayOfWeek", "Month"),
+                          remove_first_dummy = TRUE)
+
+modelling_rf <- modelling_rf[,-c(1,2,3,6)]
+
+set.seed(1)
+indexrf <- c(1:nrow(modelling_rf))
+trainrf <- indexrf[sample(indexrf ,0.7 * length(indexrf))]
+testrf <- indexrf[-trainrf]
+
+#Define the task to predict ArrDelay
+taskrf <- TaskRegr$new(id = "delaymodel", backend = modelling_rf, target = "ArrDelay")
+measure <- msr("regr.rmse") #Set measure used as RMSE
+
+#Defining learner and parameters
+learner_rf <- lrn('regr.ranger')
+learner_rf$param_set$values <- list(num.trees = 100)
+
+gr_rf <- po('scale') %>>% #Impute missing values with the mean
+  po('imputemean') %>>%
+  po(learner_rf)
+
+glrn_rf <- GraphLearner$new(gr_rf)
+
+#Fitting the model
+set.seed(1)
+glrn_rf$train(taskrf, trainrf)
+
+#Creating the predictions and counting the RMSE
+glrn_rf$predict(taskrf, testrf)$score(measure) #Test error
+glrn_rf$predict(taskrf, trainrf)$score(measure) #Training error
+```
