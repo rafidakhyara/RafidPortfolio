@@ -1,10 +1,7 @@
 import pandas as pd
 import re
 from decimal import Decimal
-import numpy as np
 import matplotlib.pyplot as plt
-import datetime as dt
-from matplotlib.dates import date2num
 
 # Importing data. Using for loops as there are a lot of CSVs
 var = vars()
