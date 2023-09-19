@@ -1,0 +1,225 @@
+---
+title: "200614920 R Markdown"
+author: "Rafid Akhyara Agung"
+date: "2023-04-03"
+output: html_document
+---
+R Code for PCA and Classification:
+
+```{r}
+library(tidyverse)
+
+#Importing the graduate admission dataset
+#https://stats.idre.ucla.edu/stat/data/binary.csv
+grad_admit <- read.csv("UCLA Graduate Admission.csv")
+
+#Separating the target variable from the explanatory variables
+grad_admit_target <- grad_admit %>% select(admit) %>% mutate(admit = as.factor(admit)) 
+
+grad_admit_vars <- grad_admit %>% select(-all_of("admit"))
+
+#Conducting principal component analysis on the explanatory variables
+pca_grad_admit <- prcomp(grad_admit_vars, scale = TRUE)
+
+#Counting the total variance explained (in percentage) for each PC
+tve <- pca_grad_admit$sdev/sum(pca_grad_admit$sdev)
+
+#Creating a running total for the variance explained
+running_tve <- c(tve[1])
+
+for(x in c(2:length(tve))){
+  running_tve <- append(running_tve, tve[x]+running_tve[x-1])
+}
+
+#Import libraries for table creation
+library(knitr)
+library(kableExtra)
+
+#A table for Total Variance Explained
+kable(data.frame(PCs = c(1,2,3), TVE = running_tve), col.names = c("No. of PCs", "Total Variance Explained"), caption = "Total Variance Explained") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+#A table of the Principal Component Loadings
+kable(pca_grad_admit$rotation, caption = "Principal Component Loadings") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+#Selecting the first 2 PCs
+grad_admit_pc <- pca_grad_admit$x[,c(1:2)]
+
+#Modifying the graduate admissions dataset so they only contain the target 
+#variable and the chosen PCs
+grad_admit <- cbind(grad_admit_target, grad_admit_pc) %>%
+  rename(PC1_Academics = PC1,
+         PC2_Rank = PC2)
+
+#Splitting the data into train and test sets
+set.seed(1)
+test_indices <- sample(c(1:nrow(grad_admit)), size = 0.2*nrow(grad_admit), replace = FALSE)
+grad_admit_train <- grad_admit[-test_indices,]
+grad_admit_test <- grad_admit[test_indices,]
+
+library(stats)
+#Training the logistic regression model
+log_reg <- glm(admit~., family = "binomial", data = grad_admit_train, control = list(maxit = 200))
+
+#A table for the Estimated Logistic Regression Coefficients
+kable(summary(log_reg)$coefficients, caption = "Estimated Logistic Regression Coefficients") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+#Obtaining the odds ratio
+odds_ratio <- data.frame(Coefficients = names(log_reg$coefficients)[-1], Odds.Ratio = exp(log_reg$coefficients)[-1])
+rownames(odds_ratio) <- NULL
+
+#A table for the odds ratio
+kable(odds_ratio, col.names = c("Variables", "Odds Ratio"), caption = "Odds Ratios for Each Variable") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+#Determining the probability threshold
+prob_threshold <- sum(grad_admit_train$admit == 1)/nrow(grad_admit_train)
+
+#Creating predictions using the logistic regression model
+log_reg_pred <- predict(log_reg, grad_admit_test, type = "response")
+log_reg_pred <- ifelse(log_reg_pred > prob_threshold, 1, 0)
+
+#Accuracy of the logistic regression model
+mean(log_reg_pred == grad_admit_test$admit)
+
+library(caret)
+#Confusion matrix for logistic regression
+kable(confusionMatrix(as.factor(log_reg_pred), grad_admit_test$admit)$table, caption = "LogReg CM") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+kable(confusionMatrix(as.factor(log_reg_pred), grad_admit_test$admit)$byClass[c(1,2)], caption = "LogReg Spec. and Sens.", col.names = NULL) %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+#Performing cross-validation to tune KNN
+set.seed(1)
+knn_cv <- train(admit~., method = "knn",
+                tuneGrid = expand.grid(k = 1:10), trControl = trainControl(method = "cv", number = 5),
+                metric = "Accuracy", data = grad_admit_train)
+
+#A table for KNN CV Results
+kable(knn_cv$results[,c(1:2)], caption = "KNN CV Results") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+#Training the KNN model
+knn <- knn3(admit~., grad_admit_train, k = 9)
+
+#Creating predictions using the KNN model
+knn_pred <- predict(knn, grad_admit_test, type = "class")
+
+#Accuracy of the KNN model
+mean(knn_pred == grad_admit_test$admit)
+
+#Confusion matrix for KNN
+kable(confusionMatrix(as.factor(knn_pred), grad_admit_test$admit)$table, caption = "KNN CM") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+kable(confusionMatrix(as.factor(knn_pred), grad_admit_test$admit)$byClass[c(1,2)], caption = "KNN Spec. and Sens.", col.names = NULL) %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+#Plotting the decision boundaries for KNN
+x_grid <- expand.grid(PC1_Academics = seq(-3.6, 2.7, by = 0.05), 
+                      PC2_Rank = seq(-2.0, 2.3, by = 0.05))
+
+x_knn_pred <- predict(knn, x_grid, type = "class")
+
+x_grid <- x_grid %>%
+  mutate(admit = x_knn_pred)
+
+theme_set(theme_bw())
+theme_update(text = element_text(size=12),
+             panel.grid.major = element_blank(),
+             panel.grid.minor = element_blank(),
+             strip.background = element_blank())
+
+ggplot() + 
+  geom_point(aes(PC1_Academics, PC2_Rank, col = admit), 
+             data = x_grid, 
+             size = 1.3, shape = 15)+
+  geom_point(aes(PC1_Academics, PC2_Rank, col = admit),
+             size = 2.5, shape = 17, data = grad_admit_test)+
+  geom_point(aes(PC1_Academics, PC2_Rank),
+             size = 2.5, shape = 2, data = grad_admit_test)+
+  ggtitle("Decision Boundaries of 9-Nearest Neighbors")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+R Code for Regression:
+
+```{r}
+library(tidyverse)
+#Importing the data and wrangling variables into factors
+#https://archive.ics.uci.edu/ml/datasets/student+performance
+stud_perf <- read.csv("Student Math Performance.csv", sep = ";") %>%
+  mutate(Medu = as.factor(Medu),
+         Fedu = as.factor(Fedu),
+         traveltime = as.factor(traveltime),
+         studytime = as.factor(studytime),
+         famrel = as.factor(famrel),
+         goout = as.factor(goout),
+         Dalc = as.factor(Dalc),
+         Walc = as.factor(Walc),
+         health = as.factor(health),
+         freetime = as.factor(freetime))
+
+#Splitting the data into train and test sets
+set.seed(1)
+test_indices <- sample(c(1:nrow(stud_perf)), size = 0.2*nrow(stud_perf), replace = FALSE)
+stud_perf_train <- stud_perf[-test_indices,]
+stud_perf_test <- stud_perf[test_indices,]
+
+#First linear regression model with all vars
+lin_reg_all <- lm(G3~., data = stud_perf_train)
+
+#Final linear regression model with only significant variables
+lin_reg <- lm(G3~age+activities+absences+G1+G2, data = stud_perf_train)
+
+library(knitr)
+library(kableExtra)
+
+#A table for Estimated Linear Regression Coefficients
+kable(summary(lin_reg)$coefficients, caption = "Estimated Linear Regression Coefficients") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+#Creating predictions using the linear regression model
+lin_reg_pred <- ifelse(predict(lin_reg, stud_perf_test) > 20, 20,
+                       ifelse(predict(lin_reg, stud_perf_test) < 0, 0, predict(lin_reg, stud_perf_test)))
+
+#Creating a function to calculate RMSE
+rmse <- function(vector1, vector2){
+  sqrt(mean((vector1-vector2)^2))
+}
+
+#RMSE of the linear regression model
+rmse(stud_perf_test$G3, lin_reg_pred)
+
+#Creating diagnostic plots for linear regression
+par(mfrow=c(2,2))
+plot(lin_reg)
+par(mfrow=c(1,1))
+
+library(rpart)
+library(rpart.plot)
+
+#Training the regression tree
+set.seed(1)
+reg_tree_full <- rpart(lin_reg$call$formula, 
+                  data = stud_perf_train,
+                  method = "anova")
+
+#A table for the regression tree errors
+kable(reg_tree_full$cptable, caption = "Regression Tree Errors at Differing Complexities") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+#Pruning the regression tree, nsplit = 5
+reg_tree <- prune(reg_tree_full, 0.01598831)
+
+#Plotting the final regression tree
+prp(reg_tree)
+
+#Creating predictions with the regression tree
+reg_tree_pred <- predict(reg_tree, stud_perf_test)
+
+#RMSE of the regression tree
+rmse(reg_tree_pred, stud_perf_test$G3)
+
+```
