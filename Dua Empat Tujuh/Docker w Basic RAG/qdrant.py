@@ -13,7 +13,7 @@ else:
 
 from google.genai import Client, types
 
-google_client = Client(api_key="AIzaSyAguG6uHe228b1GmdGWL5cbJ0QRcCaZY_E")
+google_client = Client(api_key="API_KEY")
 
 texts = [
     "Qdrant is a vector database that is compatible with Gemini.",
