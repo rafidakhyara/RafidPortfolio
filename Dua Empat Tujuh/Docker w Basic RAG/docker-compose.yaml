@@ -3,16 +3,16 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     ports:
-      - "6333:6333" # Access from host machine
-      - "6334:6334" # gRPC access
+      - "6333:6333" 
+      - "6334:6334" 
     volumes:
-      - C:/Rafid/Programs/Qdrant:/qdrant/storage
+      - local/qdrant/directory:/qdrant/storage
 
     
   rag:
     image: rag:latest
     ports:
-      - "8080:8080" #Left is hst machine, right is docker aka the one in the image file.
+      - "8080:8080" 
     environment:
       - QDRANT_URL=http://qdrant:6333
     depends_on:
