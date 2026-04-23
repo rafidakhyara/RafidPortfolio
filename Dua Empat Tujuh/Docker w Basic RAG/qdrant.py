@@ -43,6 +43,9 @@ def qdrant_upload(text):
 
     return
 
+# for text in texts:
+#     qdrant_upload(text)
+
 def qdrant_retrieve(query):
     result = google_client.models.embed_content(
         model="gemini-embedding-2-preview",
@@ -58,13 +61,3 @@ def qdrant_retrieve(query):
     )
 
     return queried_points
-
-# for text in texts:
-#     qdrant_upload(text)
-
-
-# points = qdrant_retrieve("Qdrant")
-
-# print(points)
-
-# print(points.points[0].payload['text'])
