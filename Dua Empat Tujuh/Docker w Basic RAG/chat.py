@@ -1,15 +1,13 @@
 from qdrant import qdrant_retrieve
 from google.genai import Client, types
 
-input = "What is 2+2?"
-
 def rag_chat(input):
 
     retrieved_points = qdrant_retrieve(input)
 
     retrieved_text = retrieved_points.points[0].payload['text']
 
-    google_client = Client(api_key='AIzaSyAguG6uHe228b1GmdGWL5cbJ0QRcCaZY_E')
+    google_client = Client(api_key='API_KEY')
 
     response = google_client.models.generate_content(
         model='gemini-2.5-flash',
